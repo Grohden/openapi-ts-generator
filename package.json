@@ -1,0 +1,21 @@
+{
+  "name": "openapi-ts-codegen",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "format": "dprint fmt",
+    "format:check": "dprint check"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "typescript": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^16.6.1",
+    "dprint": "^0.15.4",
+    "ts-node": "^10.2.0"
+  }
+}
