@@ -9,6 +9,7 @@
     "useBraces": "always",
     "singleBodyPosition": "nextLine",
     "trailingCommas": "onlyMultiLine",
+    "typeLiteral.separatorKind": "comma",
     "commentLine.forceSpaceAfterSlashes": true,
     "binaryExpression.preferSingleLine": true
   },

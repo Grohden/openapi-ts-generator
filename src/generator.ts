@@ -1,304 +1,217 @@
-import fs from 'fs'
 import path from 'path'
-import { entries, inCamelCase, keys, last, rejectFalsy, splitPath } from './fp'
 import {
-  printConst,
-  printFn,
-  printFnCall,
-  printNamedField,
-  printRecord,
-  printString,
-  printStringTemplate,
-  printType,
-  printUnion,
-} from './printer'
+  OptionalKind,
+  ParameterDeclarationStructure,
+  Project,
+  PropertySignatureStructure,
+  Scope,
+  StatementStructures,
+  StructureKind,
+  WriterFunction,
+  Writers,
+} from 'ts-morph'
+import { entries, keys, mapObject, rejectFalsy } from './fp'
+import { OpenAPIV3Spec, OpenAPIV3SpecPathParam } from './openapi'
+import { extractContent, extractResponseType, pathArgsToTemplate, printStringTemplate, sanitizeType } from './utils'
+import { callWriter, destructWriter, literalWriter, openAPISpecTreeSpecWriter } from './writers'
 
-const spec = require('./spec.json')
+const rootDir = path.resolve('generated')
+const spec: OpenAPIV3Spec = require('./spec.json')
+const project = new Project()
 
-type JSONContent = {
-  'application/json': {
-    schema: {
-      $ref: string
-    }
-  }
-}
-
-type PathData = {
-  operationId: string
-  summary: string
-  parameters: {
-    name: string
-    required: boolean
-    in: 'path' | 'query'
-    schema: {
-      type: string
-    }
-  }[]
-  requestBody?: {
-    required: boolean
-    content: JSONContent
-  }
-  responses: {
-    [status: string]: {
-      description: string
-      content: JSONContent
-    }
-  }
-}
-
-type SchemaType =
-  | {
-    type: undefined
-    $ref: string
-  }
-  | {
-    type: 'object'
-    properties: Record<string, SchemaType>
-    required: string[]
-  }
-  | {
-    type: 'string'
-    enum?: string[]
-  }
-  | {
-    type: 'array'
-    items: SchemaType
-  }
-  | {
-    type: 'number' | 'boolean'
-  }
-
-/**
- * Extracts a return type from an OpenApi component schema entry
- */
-const extractReturnType = (data: PathData) => {
-  const ref = (data.responses['200'] || data.responses['201'])?.content?.[
-    'application/json'
-  ].schema.$ref
-
-  return (ref && last(splitPath(ref))) || 'void'
-}
-
-/**
- * Extracts a content (argument) type from an OpenApi component
- * schema content entry
- */
-const extractContent = (
-  data: PathData,
-): {
-  argName: string
-  typeName: string
-  required: boolean
-} | null => {
-  const ref = data.requestBody?.content['application/json']?.schema?.$ref
-  const typeName = (ref && last(splitPath(ref))) || null
-
-  return typeName
-    ? {
-      argName: inCamelCase(typeName),
-      typeName: typeName,
-      required: data.requestBody?.required ?? false,
-    }
-    : null
-}
-
-/**
- * Takes the last operation available at a record
- *
- * FIXME: need to refactor here to support multiple operations
- *  on same endpoint
- */
-const parseOperation = (data: Record<string, PathData>) => {
-  return last(keys(data)) || null
-}
-
-/**
- * Transforms a path arg to a string template ready for args
- *
- * eg: '{foo}' => '${foo}'
- */
-const pathArgsToTemplate = (rawPath: string) => {
-  return rawPath.replace(/{(?=.*})/gi, '${')
-}
-
-/**
- * Recursively prints a tree of types from the schema
- */
-const printTreeType = (typeTree: SchemaType): string => {
-  if (!typeTree.type) {
-    return last(splitPath(typeTree.$ref)) || 'unknown'
-  }
-
-  if (typeTree.type === 'object') {
-    return printRecord(
-      entries(typeTree.properties).map(([name, type]) => {
-        return printNamedField({
-          name,
-          type: printTreeType(type),
-          required: typeTree.required.includes(name),
-        })
-      }),
-    )
-  }
-
-  if (typeTree.type === 'array') {
-    return `${printTreeType(typeTree.items)}[]`
-  }
-
-  if (typeTree.type === 'string') {
-    if (typeTree.enum) {
-      return printUnion(typeTree.enum.map(printString))
-    }
-
-    return 'string'
-  }
-
-  return typeTree.type
-}
-
-const operationsDefinitions = entries(spec.paths).map(([rawPath, pathData]) => {
-  const typed = pathData as Record<string, PathData>
-  const operation = parseOperation(typed)
-
-  if (!operation) {
-    console.warn(
-      `[generator] unknown operation (${operation} for path`,
-      rawPath,
-    )
-    return null
-  }
-
-  const data = typed[operation]!
-  const content = extractContent(data)
-  const name = data.operationId
-  const hasParams = data.parameters.length || content
-  const groupedIn = data.parameters.reduce(
-    (acc, param) => {
-      // not immutable for micro optimization (but effects are local)
-      param.in == 'path' ? acc.path.push(param) : acc.query.push(param)
-      return acc
-    },
-    { path: [] as typeof data.parameters, query: [] as typeof data.parameters },
-  )
-
-  return printFn({
-    kind: 'method',
-    name: name,
-    args: rejectFalsy([
-      hasParams && printNamedField({
-        name: 'params',
-        type: printRecord([
-          ...data.parameters.map((param) =>
-            printNamedField({
-              name: param.name,
-              required: param.required,
-              type: param.schema.type === 'date' ? 'string' : param.schema.type,
-            })
-          ),
-          content && printNamedField({
-            name: content.argName,
-            type: content.typeName,
-            required: content.required,
-          }),
-        ]),
-      }),
-    ]),
-    // We can print direct a destruct in the arguments
-    // but formatters tend to make them ugly, that's
-    // why I've opted to print as a body statement
-    bodyStmts: [
-      groupedIn.path.length && printConst({
-        name: printRecord(groupedIn.path.map((param) => param.name)),
-        value: 'params',
-      }),
-      groupedIn.query.length && printConst({
-        name: 'queryParams',
-        value: printRecord(
-          groupedIn.query.map((param) =>
-            printNamedField({
-              name: param.name,
-              type: `params['${param.name}']`,
-            })
-          ),
-        ),
-      }),
-      content && printConst({
-        name: 'bodyArgs',
-        value: printRecord([
-          printNamedField({
-            name: content.argName,
-            type: `params['${content.argName}']`,
-          }),
-        ]),
-      }),
-    ],
-    returnExpr: printFnCall({
-      call: 'adapter',
-      parametricArg: extractReturnType(data),
-      args: [
-        printRecord([
-          printNamedField({
-            name: 'url',
-            type: printStringTemplate(
-              `\${basePath}${pathArgsToTemplate(rawPath)}`,
-            ),
-          }),
-          printNamedField({
-            name: 'method',
-            type: printString(operation.toUpperCase()),
-          }),
-          groupedIn.query.length && 'queryParams',
-          content && 'bodyArgs',
-        ]),
-      ],
-    }),
-  })
-})
-
-const parsedSchemas = entries(spec.components.schemas).map(
-  ([typeName, typeTree]) => {
-    const typed = typeTree as SchemaType
-
-    return {
-      name: typeName,
-      body: printTreeType(typed),
-    }
-  },
-)
-
-fs.writeFileSync(
-  path.join(__dirname, 'generated.ts'),
-  `\
-// -- Types
-${rejectFalsy(parsedSchemas).map(printType).join('\n\n')}
-
-// --- Operations
-type Adapter = <T>(args: {
+const utils = project.createSourceFile(path.join(rootDir, 'utils.ts'), {
+  // language=TypeScript
+  statements: [
+    `\
+export type Adapter = <T>(args: {
   url: string
   method: 'POST' | 'GET' | 'PATCH' | 'DELETE' | 'PUT'
   queryParams?: any
   bodyArgs?: any
 }) => Promise<T>
 
-${
-    printConst({
-      name: 'apiClient',
-      exported: true,
-      value: printFn({
-        kind: 'arrow',
-        args: [
-          printNamedField({
-            name: 'basePath',
-            type: 'string',
-          }),
-          printNamedField({
-            name: 'adapter',
-            type: 'Adapter',
-          }),
-        ],
-        returnExpr: printRecord(operationsDefinitions),
-      }),
-    })
+export type Configuration = {
+  baseUrl: string
+  adapter: Adapter
+}`,
+  ],
+}, {
+  overwrite: true,
+})
+
+const models = project.createSourceFile(path.join(rootDir, 'models.ts'), {
+  statements: entries(spec.components.schemas).map(
+    ([typeName, typeSpec]) => ({
+      kind: StructureKind.TypeAlias,
+      isExported: true,
+      name: typeName,
+      type: openAPISpecTreeSpecWriter(typeSpec),
+    }),
+  ),
+}, {
+  overwrite: true,
+})
+
+const knownOperations = ['post', 'get', 'patch', 'delete', 'put']
+
+const dataFromOperationId = (operationId: string | undefined): [string, string] => {
+  const name = operationId?.split('_') || []
+
+  if (name.length !== 2) {
+    return ['Service', 'unknownName']
   }
-`,
-)
+
+  const [serviceName, methodName] = name
+
+  // Highly opinionated for NestJS.
+  return [
+    serviceName!.replace(/Controller/, 'Service'),
+    methodName!,
+  ]
+}
+
+entries(spec.paths).forEach(([rawPath, pathSpec]) => {
+  const pathSpecMethods = keys(pathSpec)
+  const unknownOperations = pathSpecMethods.filter(operation => !knownOperations.includes(operation))
+
+  if (unknownOperations.length) {
+    throw new Error(`Unknown operation(s) found for ${rawPath}: ${unknownOperations}`)
+  }
+
+  pathSpecMethods.forEach(method => {
+    const operationSpec = pathSpec[method]!
+    const [fileName, methodName] = dataFromOperationId(operationSpec.operationId)
+    const filePath = path.join(rootDir, 'services', `${fileName}.ts`)
+    const serviceFile = project.getSourceFile(filePath) || project.createSourceFile(filePath, {
+      statements: [`import type { Configuration } from '../utils'`],
+    }, {
+      overwrite: true,
+    })
+
+    const nameSpace = serviceFile.getClass(fileName) || serviceFile.addClass({
+      isExported: true,
+      name: fileName,
+      ctors: [
+        {
+          kind: StructureKind.Constructor,
+          parameters: [
+            {
+              kind: StructureKind.Parameter,
+              name: 'configuration',
+              type: utils.getTypeAliasOrThrow('Configuration').getName(),
+              scope: Scope.Private,
+            },
+          ],
+        },
+      ],
+    })
+
+    const returnType = extractResponseType(operationSpec)
+    const parametricType = returnType ? openAPISpecTreeSpecWriter(returnType.schema) : literalWriter('void')
+    const bodyParams = extractContent('bodyArgs', operationSpec)
+    const hasParameters = bodyParams || operationSpec.parameters.length
+    const groupedInParams = operationSpec.parameters.reduce(
+      (acc, param) => {
+        // not immutable for micro optimization (but effects are local)
+        param.in == 'path' ? acc.path.push(param) : acc.query.push(param)
+        return acc
+      },
+      {
+        path: [] as OpenAPIV3SpecPathParam[],
+        query: [] as OpenAPIV3SpecPathParam[],
+      },
+    )
+
+    if (bodyParams?.imports) {
+      const specifier = serviceFile.getRelativePathAsModuleSpecifierTo(models.getFilePath())
+      const declaration = serviceFile.getImportDeclaration(specifier) || serviceFile.addImportDeclaration({
+        isTypeOnly: true,
+        namedImports: [bodyParams.imports],
+        moduleSpecifier: specifier,
+      })
+
+      const namedImport = declaration.getNamedImports().find(named => named.getName() === bodyParams.imports)
+
+      if (!namedImport) {
+        declaration.addNamedImport(bodyParams.imports)
+      }
+    }
+
+    if (returnType?.typeName) {
+      const specifier = serviceFile.getRelativePathAsModuleSpecifierTo(models.getFilePath())
+      const declaration = serviceFile.getImportDeclaration(specifier) || serviceFile.addImportDeclaration({
+        isTypeOnly: true,
+        namedImports: [returnType.typeName],
+        moduleSpecifier: specifier,
+      })
+
+      const namedImport = declaration.getNamedImports().find(named => named.getName() === returnType.typeName)
+
+      if (!namedImport) {
+        declaration.addNamedImport(returnType.typeName)
+      }
+    }
+
+    // Since operation ids are supposed to be unique, I'm not
+    // gonna deal with method duplication or replacement here.
+    nameSpace.addMethod({
+      name: methodName,
+      parameters: rejectFalsy<OptionalKind<ParameterDeclarationStructure>>([
+        hasParameters && {
+          kind: StructureKind.Parameter,
+          name: 'props',
+          type: Writers.objectType({
+            properties: rejectFalsy<OptionalKind<PropertySignatureStructure>>([
+              bodyParams && {
+                name: bodyParams.contentName,
+                type: openAPISpecTreeSpecWriter(bodyParams.schema),
+                hasQuestionToken: !bodyParams.required,
+              },
+              ...operationSpec.parameters.map(prop => ({
+                name: prop.name,
+                type: sanitizeType(prop.schema.type),
+                hasQuestionToken: !prop.required,
+              })),
+            ]),
+          }),
+        },
+      ]),
+      statements: rejectFalsy<string | WriterFunction | StatementStructures>([
+        destructWriter({
+          multiline: false,
+          target: 'this.configuration',
+          properties: ['baseUrl', 'adapter'],
+        }),
+        groupedInParams.path.length && destructWriter({
+          multiline: true,
+          target: 'props',
+          properties: groupedInParams.path.map(param => param.name),
+        }),
+        writer => writer.newLine(),
+        Writers.returnStatement(callWriter({
+          callName: 'adapter',
+          parametricType,
+          params: [
+            Writers.object({
+              url: printStringTemplate(
+                `\${baseUrl}${pathArgsToTemplate(rawPath)}`,
+              ),
+              method: `'${method.toUpperCase()}'`,
+              queryParams: groupedInParams.query.length
+                ? Writers.object(mapObject(
+                  groupedInParams.query,
+                  item => [item.name, `props['${item.name}']`],
+                ))
+                : 'undefined',
+              bodyArgs: bodyParams
+                ? `props['${bodyParams.contentName}']`
+                : 'undefined',
+            }),
+          ],
+        })),
+      ]),
+    })
+  })
+})
+
+project.saveSync()

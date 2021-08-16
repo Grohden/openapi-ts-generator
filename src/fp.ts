@@ -23,6 +23,19 @@ export const entries = <
   data: T,
 ) => Object.entries(data) as [string, T[K]][]
 
+export const mapObject = <T, R>(
+  data: T[],
+  transform: (item: T) => [string, R],
+) => {
+  const acc: Record<string, unknown> = {}
+  for (const item of data) {
+    const [key, value] = transform(item)
+    acc[key] = value
+  }
+
+  return acc as Record<string, R>
+}
+
 // We can't use properly currying here due to TS limitations for
 // predicate safe guards
 export const filter = <T, S extends T>(
@@ -35,8 +48,8 @@ export const split = (separator: string) => (string: string) => string.split(sep
 // -- Specialized functions
 
 // Rejects anything that coerces to false
-export const rejectFalsy = <T>(list: T[]) => filter(isFalsy, list)
+export const rejectFalsy = <T>(list: (T | Falsy)[]) => filter(isFalsy, list)
 
 export const splitPath = split('/')
 
-export const inCamelCase = ([...str]: string): string => first(str)!.toUpperCase() + tail(str).join('')
+export const inCamelCase = ([...str]: string): string => first(str)!.toLowerCase() + tail(str).join('')
