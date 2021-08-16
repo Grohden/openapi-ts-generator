@@ -1,3 +1,4 @@
+import fetch from 'node-fetch'
 import path from 'path'
 import { Project } from 'ts-morph'
 import { generateModels } from './generators/models-file'
@@ -5,23 +6,42 @@ import { generateServices } from './generators/services-files'
 import { generateUtils } from './generators/utils-file'
 import { OpenAPIV3Spec } from './openapi'
 
-const rootDir = path.resolve('generated')
-const spec: OpenAPIV3Spec = require('./spec.json')
-const project = new Project()
+const resolveSpec = (location: string): Promise<OpenAPIV3Spec> => {
+  if ((/^https?:\/\//).test(location)) {
+    return fetch(location, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    }).then(response => response.json() as Promise<OpenAPIV3Spec>)
+  } else {
+    return Promise.resolve(require(location))
+  }
+}
 
-const utils = generateUtils({
-  rootDir,
-  project,
-})
+export const generator = async ({
+  specLocation,
+  outputDir,
+}: {
+  specLocation: string,
+  outputDir: string,
+}) => {
+  const rootDir = path.resolve(outputDir)
+  const spec = await resolveSpec(specLocation)
+  const project = new Project()
 
-const models = generateModels({ rootDir, project, spec })
+  const utils = generateUtils({
+    rootDir,
+    project,
+  })
 
-generateServices({
-  rootDir,
-  project,
-  spec,
-  models,
-  utils,
-})
+  const models = generateModels({ rootDir, project, spec })
 
-project.saveSync()
+  generateServices({
+    rootDir,
+    project,
+    spec,
+    models,
+    utils,
+  })
+
+  project.saveSync()
+}
