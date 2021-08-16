@@ -1,3 +1,4 @@
+import { SourceFile } from 'ts-morph'
 import { inCamelCase, last } from './fp'
 import { OpenAPIV3SpecPathValue } from './openapi'
 
@@ -26,7 +27,7 @@ export const pathArgsToTemplate = (rawPath: string) => {
  * Extracts a content (argument) type from an OpenApi component
  * schema content entry
  */
-export const extractContent = (fallbackName: string, data: OpenAPIV3SpecPathValue) => {
+export const extractContentSchema = (fallbackName: string, data: OpenAPIV3SpecPathValue) => {
   const body = data.requestBody
   const schema = body?.content['application/json']?.schema || null
   const typeName = schema && !schema.type ? resolveSchemaType(schema.$ref) : null
@@ -68,3 +69,33 @@ export const sanitizeType = (type: string) => {
  * Wraps a string in a string template **without escaping it**
  */
 export const printStringTemplate = (str: string) => `\`${str}\``
+
+/**
+ * Includes or creates import named declarations in the `inFile`
+ * importing from the `fromTargetFile`
+ */
+export const includeOrCreateNamedImport = ({
+  inFile,
+  fromTargetFile,
+  namedImports,
+}: {
+  inFile: SourceFile,
+  fromTargetFile: SourceFile,
+  namedImports: string[],
+}) => {
+  const specifier = inFile.getRelativePathAsModuleSpecifierTo(fromTargetFile.getFilePath())
+
+  for (const importName of namedImports) {
+    const declaration = inFile.getImportDeclaration(specifier) || inFile.addImportDeclaration({
+      isTypeOnly: true,
+      namedImports: [importName],
+      moduleSpecifier: specifier,
+    })
+
+    const namedImport = declaration.getNamedImports().find(named => named.getName() === importName)
+
+    if (!namedImport) {
+      declaration.addNamedImport(importName)
+    }
+  }
+}

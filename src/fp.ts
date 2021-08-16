@@ -16,14 +16,27 @@ export const tail = <T>([_, ...tail]: T[]) => tail
 
 export const keys = <T extends Record<string, unknown>>(data: T) => Object.keys(data) as (keyof T)[]
 
-export const entries = <
-  T extends Record<string, unknown>,
-  K extends keyof T = keyof T,
->(
+export const entries = <T extends Record<string, unknown>, K extends keyof T = keyof T>(
   data: T,
 ) => Object.entries(data) as [string, T[K]][]
 
-export const mapObject = <T, R>(
+export const groupBy = <T, R extends string>(extractKey: (item: T) => R, list: T[]) => {
+  const groups: { [group in R]?: T[] } = {}
+
+  for (const item of list) {
+    const key = extractKey(item)
+
+    if (!(key in groups)) {
+      groups[key] = []
+    }
+
+    groups[key]!.push(item)
+  }
+
+  return groups
+}
+
+export const listToObject = <T, R>(
   data: T[],
   transform: (item: T) => [string, R],
 ) => {
