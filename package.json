@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "bin": "./lib/cli.js",
   "scripts": {
+    "prepare": "rm -rf ./lib && yarn build",
+    "build": "tsc --outDir ./lib",
     "format": "dprint fmt",
     "format:check": "dprint check"
   },
