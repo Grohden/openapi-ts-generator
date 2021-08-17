@@ -3,6 +3,7 @@ import { Project, Scope, SourceFile, StructureKind, Writers } from 'ts-morph'
 import { entries, groupBy, keys, listToObject, rejectFalsy } from '../fp'
 import { OpenAPIV3Spec, RequestMethod } from '../openapi'
 import {
+  collectAllComplexSubtypeNames,
   extractContentSchema,
   extractResponseType,
   includeOrCreateNamedImport,
@@ -31,15 +32,20 @@ const dataFromOperationId = (operationId: string | undefined): [string, string] 
 }
 
 const getOrCreateServiceFile = ({
+  headers,
   project,
   filePath,
 }: {
+  headers: string[],
   project: Project,
   filePath: string,
   fileName: string,
 }) => {
   return project.getSourceFile(filePath) || project.createSourceFile(filePath, {
-    statements: [`import type { Configuration } from '../utils'`],
+    statements: [
+      ...headers,
+      `import type { Configuration } from '../utils'`,
+    ],
   }, {
     overwrite: true,
   })
@@ -48,11 +54,9 @@ const getOrCreateServiceFile = ({
 const getOrCreateServiceClass = ({
   fileName,
   serviceFile,
-  utilsFile,
 }: {
   fileName: string,
   serviceFile: SourceFile,
-  utilsFile: SourceFile,
 }) => {
   return serviceFile.getClass(fileName) || serviceFile.addClass({
     isExported: true,
@@ -64,7 +68,7 @@ const getOrCreateServiceClass = ({
           {
             kind: StructureKind.Parameter,
             name: 'configuration',
-            type: utilsFile.getTypeAliasOrThrow('Configuration').getName(),
+            type: 'Configuration',
             scope: Scope.Private,
           },
         ],
@@ -74,19 +78,17 @@ const getOrCreateServiceClass = ({
 }
 
 const serviceFromPathSpecification = ({
+  headers,
   rawPath,
   method,
-  utilsFile,
-  modelsFile,
   pathSpec,
   project,
   rootDir,
 }: {
+  headers: string[],
   rawPath: string,
   method: Lowercase<RequestMethod>,
   project: Project,
-  utilsFile: SourceFile,
-  modelsFile: SourceFile,
   pathSpec: OpenAPIV3Spec['paths'][string],
   rootDir: string,
 }) => {
@@ -95,6 +97,7 @@ const serviceFromPathSpecification = ({
   const filePath = path.join(rootDir, 'services', `${fileName}.ts`)
 
   const serviceFile = getOrCreateServiceFile({
+    headers,
     filePath,
     fileName,
     project,
@@ -103,7 +106,6 @@ const serviceFromPathSpecification = ({
   const nameSpace = getOrCreateServiceClass({
     fileName,
     serviceFile,
-    utilsFile,
   })
 
   const returnType = extractResponseType(operationSpec)
@@ -114,13 +116,13 @@ const serviceFromPathSpecification = ({
 
   const potentialImportsToInclude = rejectFalsy([
     bodyParams?.imports,
-    returnType?.typeName,
+    ...(returnType ? collectAllComplexSubtypeNames(returnType.schema) : []),
   ])
 
   if (potentialImportsToInclude.length) {
     includeOrCreateNamedImport({
       inFile: serviceFile,
-      fromTargetFile: modelsFile,
+      fromTargetModule: '../models',
       namedImports: potentialImportsToInclude,
     })
   }
@@ -184,19 +186,19 @@ const serviceFromPathSpecification = ({
       })),
     ]),
   })
+
+  return serviceFile
 }
 
 export const generateServices = ({
+  headers,
   rootDir,
   project,
   spec,
-  models,
-  utils,
 }: {
+  headers: string[],
   rootDir: string,
   project: Project,
-  models: SourceFile,
-  utils: SourceFile,
   spec: OpenAPIV3Spec,
 }) => {
   entries(spec.paths).forEach(([rawPath, pathSpec]) => {
@@ -209,11 +211,10 @@ export const generateServices = ({
 
     pathSpecMethods.forEach(method =>
       serviceFromPathSpecification({
+        headers,
         rawPath,
         pathSpec,
         method,
-        utilsFile: utils,
-        modelsFile: models,
         project,
         rootDir,
       })

@@ -1,6 +1,6 @@
 import { SourceFile } from 'ts-morph'
-import { inCamelCase, last } from './fp'
-import { OpenAPIV3SpecPathValue } from './openapi'
+import { inCamelCase, last, values } from './fp'
+import { OpenAPIV3SpecPathValue, OpenAPIV3SpecSchemaType } from './openapi'
 
 /**
  * Splits a schema ref and returns the last name contained in it
@@ -76,20 +76,22 @@ export const printStringTemplate = (str: string) => `\`${str}\``
  */
 export const includeOrCreateNamedImport = ({
   inFile,
-  fromTargetFile,
+  fromTargetModule,
   namedImports,
 }: {
   inFile: SourceFile,
-  fromTargetFile: SourceFile,
+  // Resolving a target module
+  // using getRelativePathAsModuleSpecifierTo
+  // takes too much time, so, if we already know
+  // the specifier, we just use it.
+  fromTargetModule: string,
   namedImports: string[],
 }) => {
-  const specifier = inFile.getRelativePathAsModuleSpecifierTo(fromTargetFile.getFilePath())
-
   for (const importName of namedImports) {
-    const declaration = inFile.getImportDeclaration(specifier) || inFile.addImportDeclaration({
+    const declaration = inFile.getImportDeclaration(fromTargetModule) || inFile.addImportDeclaration({
       isTypeOnly: true,
       namedImports: [importName],
-      moduleSpecifier: specifier,
+      moduleSpecifier: fromTargetModule,
     })
 
     const namedImport = declaration.getNamedImports().find(named => named.getName() === importName)
@@ -98,4 +100,29 @@ export const includeOrCreateNamedImport = ({
       declaration.addNamedImport(importName)
     }
   }
+}
+
+/**
+ * Recursively collects all possible complex names (type aliases, interfaces, classes)
+ */
+export const collectAllComplexSubtypeNames = (typeSpec: OpenAPIV3SpecSchemaType): string[] => {
+  if (!typeSpec.type) {
+    return [resolveSchemaType(typeSpec.$ref) || 'unknown']
+  }
+
+  if (typeSpec.type === 'array') {
+    return collectAllComplexSubtypeNames(typeSpec.items)
+  }
+
+  if (typeSpec.type === 'object') {
+    if (!typeSpec.properties) {
+      return []
+    }
+
+    return values(typeSpec.properties).reduce((last, propSpec) => {
+      return [...last, ...collectAllComplexSubtypeNames(propSpec)]
+    }, [])
+  }
+
+  return []
 }

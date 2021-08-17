@@ -7,7 +7,7 @@ export type OpenAPIV3SpecSchemaType =
   }
   | {
     type: 'object',
-    properties: Record<string, OpenAPIV3SpecSchemaType>,
+    properties?: Record<string, OpenAPIV3SpecSchemaType>,
     required?: string[],
   }
   | {

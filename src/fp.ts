@@ -1,6 +1,6 @@
 // -- Base functions
 
-export type Falsy = null | undefined | 0 | ''
+export type Falsy = null | undefined | 0 | '' | false
 
 export type NonFalsy<T> = T extends Falsy ? never : T
 
@@ -17,8 +17,10 @@ export const tail = <T>([_, ...tail]: T[]) => tail
 export const keys = <T extends Record<string, unknown>>(data: T) => Object.keys(data) as (keyof T)[]
 
 export const entries = <T extends Record<string, unknown>, K extends keyof T = keyof T>(
-  data: T,
+  data: NonNullable<T>,
 ) => Object.entries(data) as [string, T[K]][]
+
+export const values = <T>(data: NonNullable<T>) => Object.values(data)
 
 export const groupBy = <T, R extends string>(extractKey: (item: T) => R, list: T[]) => {
   const groups: { [group in R]?: T[] } = {}
