@@ -1,6 +1,6 @@
 # Open API ts generator
 
-This is just an unpublished code for a typescript codegen for openAPI 3.0.
+This is just an ~unpublished~ code for a typescript codegen for openAPI 3.0.
 
 ## What it does?
 It generates a code that can be used in probably any JS environment (node, web, RN), but it doesn't
@@ -20,8 +20,8 @@ for history purposes, it was fun to write it :D
 
 ## Running
 
-If you are really interested in running this generator, clone the project and run:
+If you are really interested in running this generator:
 
 ```shell
-ts-node ./src/cli.ts  --spec "<path or URL>" --output "<path>"
+npx @grohden/openapi-ts-generator --spec "path or URL" --output ./test
 ```
