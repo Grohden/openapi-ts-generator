@@ -62,6 +62,18 @@ export const openAPISpecTreeSpecWriter = (typeSpec: OpenAPIV3SpecSchemaType): Wr
     })
   }
 
+  if (typeSpec.type === 'string' && typeSpec.enum?.length) {
+    const values = typeSpec.enum.map(entry => `'${entry}'`)
+
+    if (values.length === 1) {
+      return literalWriter(values[0]!)
+    }
+
+    const [a, b, ...rest] = values
+
+    return Writers.unionType(a!, b!, ...rest)
+  }
+
   if (!typeSpec.type) {
     return literalWriter(resolveSchemaType(typeSpec.$ref) || 'unknown')
   }
