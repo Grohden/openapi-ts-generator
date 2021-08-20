@@ -15,8 +15,11 @@ I found two alternatives:
 * [openapi-ts-codegen](https://www.npmjs.com/package/openapi-ts-codegen)
 * [openapi-typescript-codegen](https://www.npmjs.com/package/openapi-typescript-codegen)
 
-The later one aligns a lot with what I've wanted to do, so I'm going to stick with it. But I'm publishing my code
+~~The later one aligns a lot with what I've wanted to do, so I'm going to stick with it.~~ But I'm publishing my code
 for history purposes, it was fun to write it :D
+
+I'm not using the last one anymore because it doesn't support global interceptors, and this is an essential
+feature for me.
 
 ## Running
 
