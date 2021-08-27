@@ -98,5 +98,5 @@ export const createConfiguration = (handlers?: {
 
 
 So, given a spec that works with this client, it will create at least one service file
-that exposes a class that doesn't have any domain on how should its request should be executed, instead
-should be instantiated passing an adapter.
+that exposes a class that doesn't have any domain on how its request will be executed, instead, it delegates that
+responsability to you, through an adapter that you should implement.
